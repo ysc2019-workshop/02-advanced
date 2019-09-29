@@ -1,0 +1,157 @@
+---
+title: "The Great British Bake Off"
+params:
+  color:
+    label: 'Fill color (hex):'
+    value: '#17a2b8'
+  colorpop:
+    label: 'Pop-out color (hex):'
+    value: '#e7553c'
+  series:
+    input: numeric
+    label: 'Series:'
+    max: 9
+    min: 1
+    step: 1
+    value: 1
+output:
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.path = "figs/")
+library(tidyverse)
+library(here)
+library(glue)
+library(wesanderson)
+theme_set(theme_minimal())
+```
+
+```{r import-tidy, include=FALSE}
+ratings <- readr::read_csv(here::here("data/ratings.csv"))
+```
+
+```{r selected-series, include=FALSE}
+this_ratings <- ratings %>% 
+  filter(series == params$series)
+
+all_ratings <- ratings %>% 
+  filter(!series == params$series) %>% 
+  add_count(episode) %>% 
+  group_by(episode, n) %>% 
+  summarize(median_viewers = median(viewers_7day))
+
+median_viewers <- ratings %>% 
+  summarize(median_viewers = median(viewers_7day)) %>% 
+  pull()
+
+median_series <- this_ratings %>%
+  summarize(median_viewers = median(viewers_7day)) %>% 
+  pull()
+```
+
+
+# Overview
+
+\
+
+Series `r params$series` premiered on `r min(this_ratings$uk_airdate)`, and had `r n_distinct(this_ratings$episode)` episodes.
+
+\
+
+# Ratings
+
+\
+
+Figure \@ref(fig:ratings-by-episode) shows the 7-day viewers (in millions) by episode.
+
+\
+
+```{r ratings-by-episode, fig.cap="Viewers by episode"}
+ggplot(this_ratings, 
+       aes(as.factor(episode), viewers_7day, group = 1)
+       ) + 
+  geom_point(colour = params$color) + 
+  geom_line(colour = params$color) + 
+  labs(
+    x = "Episode", 
+    y = "Viewers (millions)"
+  ) +
+  expand_limits(y = 0) 
+```
+
+\
+
+# Finale
+
+\
+
+The series `r params$series` finale aired on on `r max(this_ratings$uk_airdate)`. On average, finales always garner more viewers than premieres.
+
+\
+
+```{r finale-viewers, fig.cap="Finale 7-day Viewers, Relative to Premiere"}
+# some more serious wrangling here
+first_last <- ratings %>% 
+  select(series, episode, viewers_7day) %>% 
+  group_by(series) %>% 
+  filter(episode == 1 | episode == max(episode)) %>% 
+  mutate(episode = recode(episode, `1` = "first", .default = "last")) 
+
+viewers_wide <- first_last %>%
+  pivot_wider(names_from = episode, values_from = viewers_7day) %>%
+  mutate(finale_bump = last - first,
+         pct_change = (last - first) / first)
+  
+ggplot(viewers_wide, 
+       aes(x = fct_rev(as.factor(series)),
+           y = finale_bump)) +
+  geom_col(data = filter(viewers_wide, !series == params$series), 
+           fill = params$color, 
+           alpha = .5) +
+  geom_col(data = filter(viewers_wide, series == params$series), 
+           fill = params$colorpop, 
+           alpha = .5) +
+  coord_flip() +
+  labs(x = "Series", y = "Difference in Viewers- Finale vs Premiere (millions)") 
+```
+
+\
+
+Figure \@ref(fig:finale-viewers) shows the "bump" observed in numbers of viewers for the finale compared to the premiere. The percentage difference may be more meaningful, here however, as shown in Figure \@ref(fig:finale-percent).
+
+\
+
+```{r finale-percent, fig.cap="Percent Increases in Viewers"}
+ggplot(viewers_wide, aes(x = fct_rev(as.factor(series)),
+                      y = pct_change)) +
+  geom_point(color = params$color, size = 2) +
+  geom_segment(aes(xend = fct_rev(as.factor(series)), yend = 0), 
+               color = params$color) +
+  geom_text(aes(label = scales::percent(pct_change)), hjust = -.25) +
+  labs(x = "Series", y = "% Change in Viewers from First to Last Episode") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, .85)) +
+  coord_flip()
+```
+
+\
+
+```{r finale-scatterplot}
+ggplot(viewers_wide, aes(x = first, y = last)) +
+  geom_point(data = filter(viewers_wide, !series == params$series)) +
+  geom_point(data = filter(viewers_wide, series == params$series), 
+             colour = params$colorpop) +
+  geom_smooth(se = FALSE, color = params$color) +
+  geom_abline(slope = 1, intercept = 0, color = "gray", alpha = .5) +
+  geom_text(aes(label = series), hjust = -1) +
+  labs(x = "Premiere Episode 7-day Viewers (millions)",
+       y = "Finale Episode 7-day Viewers (millions)") +
+  coord_equal(ratio = 1)
+```
+
